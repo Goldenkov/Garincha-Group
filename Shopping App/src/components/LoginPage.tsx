@@ -12,13 +12,16 @@ interface LoginPageProps {
 
 export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambicoins, onLoginSuccess }: LoginPageProps) {
   const [isLogin, setIsLogin] = useState(true);
+  const [identifier, setIdentifier] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+  const [needsOtp, setNeedsOtp] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+
   const { login, register } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,12 +30,35 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
     setIsLoading(true);
 
     try {
-      let success = false;
-      
       if (isLogin) {
-        success = await login(email, password);
-        if (!success) {
-          setError('Неверный email или пароль');
+        if (!identifier.trim()) {
+          setError('Введите email или номер телефона');
+          setIsLoading(false);
+          return;
+        }
+
+        const result = await login(identifier, password, needsOtp ? otpCode : undefined);
+
+        if (result.success) {
+          setNeedsOtp(false);
+          setOtpCode('');
+          setIdentifier('');
+          setPassword('');
+          if (onLoginSuccess) {
+            onLoginSuccess();
+          } else {
+            onBack();
+          }
+          return;
+        }
+
+        if (result.requiresOtp) {
+          setNeedsOtp(true);
+          setError(result.message || 'Введите одноразовый код из приложения-аутентификатора');
+        } else {
+          setNeedsOtp(false);
+          setOtpCode('');
+          setError(result.message || 'Неверный email/телефон или пароль');
         }
       } else {
         if (!name.trim()) {
@@ -40,21 +66,26 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
           setIsLoading(false);
           return;
         }
-        success = await register(email, password, name, phone);
+        const success = await register(email, password, name, phone);
         if (!success) {
-          setError('Пользователь с таким email уже существует');
-        }
-      }
-      
-      if (success) {
-        // Успешный вход/регистрация
-        if (onLoginSuccess) {
-          onLoginSuccess();
+          setError('Пользователь с таким email или телефоном уже существует');
         } else {
-          onBack();
+          setIdentifier('');
+          setPassword('');
+          setName('');
+          setPhone('');
+          setEmail('');
+          if (onLoginSuccess) {
+            onLoginSuccess();
+          } else {
+            onBack();
+          }
+          setIsLoading(false);
+          return;
         }
       }
     } catch (error) {
+      console.error('Ошибка при обработке формы входа/регистрации:', error);
       setError('Произошла ошибка. Попробуйте еще раз.');
     } finally {
       setIsLoading(false);
@@ -62,21 +93,33 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
   };
 
   const handleDemoLogin = async () => {
-    setEmail('demo@example.com');
+    setIdentifier('demo@example.com');
     setPassword('demo123');
     setIsLoading(true);
-    
-    const success = await login('demo@example.com', 'demo123');
-    if (success) {
-      if (onLoginSuccess) {
-        onLoginSuccess();
+
+    try {
+      const result = await login('demo@example.com', 'demo123', needsOtp ? otpCode : undefined);
+
+      if (result.success) {
+        setNeedsOtp(false);
+        setOtpCode('');
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        } else {
+          onBack();
+        }
+      } else if (result.requiresOtp) {
+        setNeedsOtp(true);
+        setError(result.message || 'Введите код из приложения-аутентификатора для демо-аккаунта');
       } else {
-        onBack();
+        setError(result.message || 'Ошибка демо-входа');
       }
-    } else {
-      setError('Ошибка демо-входа');
+    } catch (demoError) {
+      console.error('Ошибка демо-входа:', demoError);
+      setError('Не удалось выполнить демо-вход. Попробуйте еще раз.');
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
@@ -180,19 +223,35 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
               </div>
             )}
 
-            <div>
-              <label className="block text-[14px] font-medium text-gray-700 mb-2">
-                Email *
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8B4513] focus:border-transparent outline-none"
-                placeholder="example@email.com"
-                required
-              />
-            </div>
+            {isLogin ? (
+              <div>
+                <label className="block text-[14px] font-medium text-gray-700 mb-2">
+                  Email или телефон *
+                </label>
+                <input
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8B4513] focus:border-transparent outline-none"
+                  placeholder="example@email.com или +7 (999) 123-45-67"
+                  required={isLogin}
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[14px] font-medium text-gray-700 mb-2">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8B4513] focus:border-transparent outline-none"
+                  placeholder="example@email.com"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-[14px] font-medium text-gray-700 mb-2">
@@ -208,6 +267,27 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
                 minLength={6}
               />
             </div>
+
+            {needsOtp && (
+              <div>
+                <label className="block text-[14px] font-medium text-gray-700 mb-2">
+                  Код подтверждения *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8B4513] focus:border-transparent outline-none tracking-[0.3em] text-center uppercase"
+                  placeholder="123456"
+                  required={needsOtp}
+                />
+                <p className="mt-2 text-[12px] text-gray-600">
+                  Откройте Google Authenticator или Яндекс.Аутентификатор и введите текущий 6-значный код.
+                </p>
+              </div>
+            )}
 
             {!isLogin && (
               <div>
@@ -259,14 +339,18 @@ export default function LoginPage({ onBack, onMenuClick, cartCount, totalBambico
           >
             <p className="text-[14px] text-gray-600">
               {isLogin ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}
-              <button
-                onClick={() => {
-                  setIsLogin(!isLogin);
-                  setError('');
-                  setEmail('');
-                  setPassword('');
-                  setName('');
-                  setPhone('');
+                <button
+                  onClick={() => {
+                    setIsLogin(!isLogin);
+                    setError('');
+                    setIsLoading(false);
+                    setEmail('');
+                    setIdentifier('');
+                    setPassword('');
+                    setName('');
+                    setPhone('');
+                  setNeedsOtp(false);
+                  setOtpCode('');
                 }}
                 className="ml-2 text-[#8B4513] font-medium hover:underline"
               >
