@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, TwoFactorProvider } from '../contexts/AuthContext';
+import { createOtpAuthUrl, generateTwoFactorSecret, verifyTotpToken } from '../utils/totp';
 
 interface ProfilePageProps {
   onBack: () => void;
@@ -11,13 +12,100 @@ interface ProfilePageProps {
 }
 
 export default function ProfilePage({ onBack, onMenuClick, cartCount, totalBambicoins, onLoginClick }: ProfilePageProps) {
-  const { user, logout, updateProfile } = useAuth();
+  const { user, logout, updateProfile, enableTwoFactor, disableTwoFactor } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     name: user?.name || '',
     email: user?.email || '',
     phone: user?.phone || ''
   });
+  const [twoFactorInfo, setTwoFactorInfo] = useState('');
+  const [isTwoFactorSetupVisible, setIsTwoFactorSetupVisible] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<TwoFactorProvider>('google');
+  const [twoFactorSecret, setTwoFactorSecret] = useState<string | null>(null);
+  const [twoFactorOtp, setTwoFactorOtp] = useState('');
+  const [twoFactorOtpauth, setTwoFactorOtpauth] = useState<string | null>(null);
+
+  const getProviderLabel = (provider?: TwoFactorProvider) => {
+    switch (provider) {
+      case 'yandex':
+        return 'Яндекс.Аутентификатор';
+      case 'google':
+        return 'Google Authenticator';
+      default:
+        return 'приложение-аутентификатор';
+    }
+  };
+
+  const resetTwoFactorSetup = () => {
+    setIsTwoFactorSetupVisible(false);
+    setTwoFactorSecret(null);
+    setTwoFactorOtp('');
+    setTwoFactorOtpauth(null);
+  };
+
+  const handleCancelTwoFactor = () => {
+    resetTwoFactorSetup();
+    setTwoFactorInfo('Настройка двухфакторной аутентификации отменена.');
+  };
+
+  const handleStartTwoFactor = (provider: TwoFactorProvider) => {
+    if (!user) {
+      return;
+    }
+
+    setSelectedProvider(provider);
+    setTwoFactorInfo('');
+
+    try {
+      const secret = generateTwoFactorSecret();
+      const identifier = user.email || user.phone || user.name || 'Shopping App';
+      const otpauth = createOtpAuthUrl(secret, identifier, 'Shopping App', provider);
+
+      setTwoFactorSecret(secret);
+      setTwoFactorOtpauth(otpauth);
+      setTwoFactorOtp('');
+      setIsTwoFactorSetupVisible(true);
+    } catch (error) {
+      console.error('Не удалось сгенерировать секрет для 2FA:', error);
+      setTwoFactorInfo('Не удалось сгенерировать секретный ключ. Проверьте поддержку Web Crypto API в браузере.');
+      resetTwoFactorSetup();
+    }
+  };
+
+  const handleConfirmTwoFactor = async () => {
+    if (!twoFactorSecret) {
+      setTwoFactorInfo('Сначала сгенерируйте секретный ключ.');
+      return;
+    }
+
+    if (!twoFactorOtp.trim()) {
+      setTwoFactorInfo('Введите код подтверждения из приложения-аутентификатора.');
+      return;
+    }
+
+    try {
+      const isValid = await verifyTotpToken(twoFactorOtp.trim(), twoFactorSecret);
+
+      if (!isValid) {
+        setTwoFactorInfo('Неверный код. Проверьте приложение и попробуйте снова.');
+        return;
+      }
+
+      enableTwoFactor({ type: selectedProvider, secret: twoFactorSecret });
+      setTwoFactorInfo('Двухфакторная аутентификация успешно включена.');
+      resetTwoFactorSetup();
+    } catch (error) {
+      console.error('Не удалось проверить код двухфакторной аутентификации:', error);
+      setTwoFactorInfo('Не удалось проверить код. Убедитесь, что устройство поддерживает Web Crypto API.');
+    }
+  };
+
+  const handleDisableTwoFactor = () => {
+    disableTwoFactor();
+    setTwoFactorInfo('Двухфакторная аутентификация отключена.');
+    resetTwoFactorSetup();
+  };
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -300,23 +388,140 @@ export default function ProfilePage({ onBack, onMenuClick, cartCount, totalBambi
               <h2 className="text-[20px] font-bold text-gray-900 mb-4">
                 Управление аккаунтом
               </h2>
-              
+
               <div className="space-y-3">
                 <button className="w-full bg-gray-50 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-100 transition-colors text-left">
                   📋 История заказов
                 </button>
-                
+
                 <button className="w-full bg-gray-50 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-100 transition-colors text-left">
                   ❤️ Избранные товары
                 </button>
-                
+
                 <button className="w-full bg-gray-50 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-100 transition-colors text-left">
                   🔔 Уведомления
                 </button>
-                
-                <button className="w-full bg-gray-50 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-100 transition-colors text-left">
-                  🛡️ Безопасность
-                </button>
+              </div>
+            </div>
+
+            <div>
+              <h2 className="text-[20px] font-bold text-gray-900 mb-4">
+                Безопасность
+              </h2>
+
+              <div className="bg-gray-50 rounded-lg p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <p className="text-[16px] font-semibold text-gray-900">Двухфакторная аутентификация</p>
+                    <p className="text-[14px] text-gray-600">
+                      {user.twoFactorEnabled
+                        ? `Включена (${getProviderLabel(user.twoFactorType)})`
+                        : 'Выключена'}
+                    </p>
+                  </div>
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-[12px] font-medium ${user.twoFactorEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>
+                    {user.twoFactorEnabled ? 'Активна' : 'Выключена'}
+                  </span>
+                </div>
+
+                {twoFactorInfo && (
+                  <div className="bg-white border border-[#8B4513]/20 rounded-lg px-4 py-3 text-[14px] text-gray-700">
+                    {twoFactorInfo}
+                  </div>
+                )}
+
+                {user.twoFactorEnabled ? (
+                  <div className="space-y-3">
+                    <p className="text-[14px] text-gray-600">
+                      При входе после пароля потребуется код из {getProviderLabel(user.twoFactorType)}.
+                    </p>
+                    <button
+                      onClick={handleDisableTwoFactor}
+                      className="w-full bg-red-50 text-red-600 py-3 px-4 rounded-lg font-medium hover:bg-red-100 transition-colors border border-red-200"
+                    >
+                      Отключить двухфакторную аутентификацию
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-[14px] text-gray-600">
+                      Подключите второй фактор через любимое приложение-аутентификатор. Поддерживаются Google Authenticator и Яндекс.Аутентификатор.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={() => handleStartTwoFactor('google')}
+                        className="flex-1 bg-[#8B4513] text-white py-3 px-4 rounded-lg font-medium hover:bg-[#6B3410] transition-colors"
+                      >
+                        Google Authenticator
+                      </button>
+                      <button
+                        onClick={() => handleStartTwoFactor('yandex')}
+                        className="flex-1 bg-gray-200 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                      >
+                        Яндекс.Аутентификатор
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isTwoFactorSetupVisible && !user.twoFactorEnabled && (
+                  <div className="border border-[#8B4513]/20 rounded-lg p-4 bg-white space-y-4">
+                    <h3 className="text-[16px] font-semibold text-gray-900">
+                      Подключение ({getProviderLabel(selectedProvider)})
+                    </h3>
+                    <p className="text-[14px] text-gray-600">
+                      Добавьте аккаунт вручную и подтвердите 6-значным кодом из приложения.
+                    </p>
+
+                    <div className="bg-gray-100 rounded-lg p-3">
+                      <p className="text-[12px] text-gray-600">Секретный ключ для ввода вручную:</p>
+                      <p className="font-mono text-[16px] text-gray-900 break-all">{twoFactorSecret}</p>
+                    </div>
+
+                    {twoFactorOtpauth && (
+                      <p className="text-[12px] text-gray-600 break-all">
+                        Быстрое добавление (откроется соответствующее приложение):{' '}
+                        <a href={twoFactorOtpauth} className="text-[#8B4513] underline break-all">{twoFactorOtpauth}</a>
+                      </p>
+                    )}
+
+                    <ol className="list-decimal list-inside space-y-1 text-[12px] text-gray-600">
+                      <li>Откройте {getProviderLabel(selectedProvider)} и выберите добавление аккаунта.</li>
+                      <li>Введите секретный ключ вручную или воспользуйтесь ссылкой выше.</li>
+                      <li>Введите текущий код из приложения в поле ниже и подтвердите.</li>
+                    </ol>
+
+                    <div>
+                      <label className="block text-[14px] font-medium text-gray-700 mb-2">
+                        Код из приложения
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={twoFactorOtp}
+                        onChange={(e) => setTwoFactorOtp(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8B4513] focus:border-transparent outline-none tracking-[0.3em] text-center"
+                        placeholder="123456"
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={handleConfirmTwoFactor}
+                        className="flex-1 bg-[#8B4513] text-white py-3 px-4 rounded-lg font-medium hover:bg-[#6B3410] transition-colors"
+                      >
+                        Подтвердить код
+                      </button>
+                      <button
+                        onClick={handleCancelTwoFactor}
+                        className="flex-1 bg-gray-200 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
