@@ -1,0 +1,15 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Central FD", "code": "CFD"},
+      "geometry": {"type": "Polygon", "coordinates": [[[34,52],[42,52],[42,58],[34,58],[34,52]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Siberian FD", "code": "SFD"},
+      "geometry": {"type": "Polygon", "coordinates": [[[73,52],[90,52],[90,58],[73,58],[73,52]]]}
+    }
+  ]
+}
