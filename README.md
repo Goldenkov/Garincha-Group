@@ -47,3 +47,15 @@ docker build -t garincha-group .
 # 2. Запустите контейнер (порт 8000 хоста → 8000 в контейнере)
 docker run -d --name garincha-group -p 8000:8000 garincha-group
 ```
+
+### Мобильное приложение
+
+В каталоге [`mobile_app/`](mobile_app/) находится Expo/React Native клиент со следующими командами:
+
+```bash
+cd mobile_app
+npm install      # установка зависимостей
+npm run start    # запуск Expo Dev Server и выбор платформы
+```
+
+Дополнительные подробности по структуре, сценариям и настройке размещены в [`mobile_app/README.md`](mobile_app/README.md).
